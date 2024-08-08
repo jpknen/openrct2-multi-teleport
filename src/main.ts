@@ -92,10 +92,7 @@ const userActions = {
 			}
 			else if (column == 2) {
 				teleports[index].bothWays = !teleports[index].bothWays;
-				teleports.forEach(teleport => {
-					teleport.register.a = []; // reset
-					teleport.register.b = []; // reset
-				});
+				teleports[index].register = { a: [], b: [] }; // reset
 			}
 		}
 		mainWin.update();
@@ -241,8 +238,16 @@ function IsTeleportSet(teleport: Teleport): boolean {
 		teleport.p1.x > -1 && teleport.p1.y > -1 && teleport.p1.z > -1;
 }
 
-function GuestsOnTile(xy: CoordsXY): Guest[] {
-	return map.getAllEntitiesOnTile("guest", { x: xy.x * 32, y: xy.y * 32 });
+function GuestsOnTile(tile: Tile): Guest[] {
+	return map.getAllEntitiesOnTile("guest", { x: tile.x * 32, y: tile.y * 32 });
+}
+
+function IsSameZ(guest: Guest, teleportCoords: CoordsXYZ): boolean {
+	return guest.z >= teleportCoords.z && guest.z < teleportCoords.z + 16
+}
+
+function IsNotYetRegistered(guestId: number, teleport: Teleport): boolean {
+	return teleport.register.a.indexOf(guestId) === -1 && teleport.register.b.indexOf(guestId) === -1
 }
 
 function SetGuestNewPos(guest: Guest, coordsFrom: CoordsXYZ, coordsTo: CoordsXYZ): void {
@@ -286,13 +291,10 @@ export function main(): void {
 					const tileA: Tile = map.getTile(teleport.p0.x / 32, teleport.p0.y / 32);
 					const tileB: Tile = map.getTile(teleport.p1.x / 32, teleport.p1.y / 32);
 
-					let tileAcoords: CoordsXY = { x: tileA.x, y: tileA.y };
-					let tileBcoords: CoordsXY = { x: tileB.x, y: tileB.y };
-
-					GuestsOnTile(tileAcoords).forEach((guest) => {
-						if (guest.z >= teleport.p0.z && guest.z < teleport.p0.z + 16) {
+					GuestsOnTile(tileA).forEach((guest) => {
+						if (IsSameZ(guest, teleport.p0)) {
 							if (teleport.bothWays) {
-								if (teleport.register.a.indexOf(Number(guest.id)) === -1 && teleport.register.b.indexOf(Number(guest.id)) === -1) {
+								if (IsNotYetRegistered(Number(guest.id), teleport)) {
 									teleport.register.a.push(Number(guest.id));
 									SetGuestNewPos(guest, teleport.p0, teleport.p1);
 								}
@@ -303,18 +305,17 @@ export function main(): void {
 					});
 
 					if (teleport.bothWays) {
-
-						GuestsOnTile(tileBcoords).forEach((guest) => {
-							if (guest.z >= teleport.p1.z && guest.z < teleport.p1.z + 16) {
-								if (teleport.register.a.indexOf(Number(guest.id)) === -1 && teleport.register.b.indexOf(Number(guest.id)) === -1) {
+						GuestsOnTile(tileB).forEach((guest) => {
+							if (IsSameZ(guest, teleport.p1)) {
+								if (IsNotYetRegistered(Number(guest.id), teleport)) {
 									teleport.register.b.push(Number(guest.id));
 									SetGuestNewPos(guest, teleport.p1, teleport.p0);
 								}
 							}
 						});
 
-						RemoveGuestsFromRegister(teleport.register.a, GuestsOnTile(tileBcoords));
-						RemoveGuestsFromRegister(teleport.register.b, GuestsOnTile(tileAcoords));
+						RemoveGuestsFromRegister(teleport.register.a, GuestsOnTile(tileB));
+						RemoveGuestsFromRegister(teleport.register.b, GuestsOnTile(tileA));
 
 					}
 
