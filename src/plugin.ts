@@ -4,7 +4,7 @@ import { main } from './main';
 
 registerPlugin({
 	name: "Multi teleport",
-	version: "0.0.1",
+	version: "1.0",
 	authors: ["jpknen"],
 	type: "local",
 	targetApiVersion: 94,
