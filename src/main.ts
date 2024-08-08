@@ -1,30 +1,62 @@
 // main.ts
 
-class Teleport {
-	public p0: number[] = [];
-	public p1: number[] = [];
-	public bothWays: boolean = false;
-	constructor(p0: number[], p1: number[], bothWays: boolean) {
-		this.p0 = p0;
-		this.p1 = p1;
-		this.bothWays = bothWays;
+interface StorageDefaults {
+	[storageType: string]: { [memberName: string]: { path: string; value: any } }
+}
+
+const storageDefaults: StorageDefaults = {
+	sharedStorage: {
+		"saveTeleports": { path: "MultiTeleport.saveTeleports", value: false },
+	},
+	parkStorage: {
+		"teleports": { path: "MultiTeleport.teleports", value: [] as Teleport[] }
 	}
 }
 
-const teleports: Teleport[] = [];
+const storage = {
+	sharedStorage: {
+		get<T>(memberName: string): T {
+			return context.sharedStorage.get(storageDefaults.sharedStorage[memberName].path, storageDefaults.sharedStorage[memberName].value) as T;
+		},
+		set<T>(memberName: string, value: T): void {
+			context.sharedStorage.set(storageDefaults.sharedStorage[memberName].path, value);
+		}
+	},
+	parkStorage: {
+		get<T>(memberName: string): T {
+			return context.getParkStorage().get(storageDefaults.parkStorage[memberName].path, storageDefaults.parkStorage[memberName].value) as T;
+		},
+		set<T>(memberName: string, value: T): void {
+			context.getParkStorage().set(storageDefaults.parkStorage[memberName].path, value);
+		}
+	}
+}
 
+interface Teleport {
+	p0: CoordsXYZ;
+	p1: CoordsXYZ;
+	bothWays: boolean;
+	register: { a: number[], b: number[] };
+}
+
+function CoordsXYZToString(v: CoordsXYZ): string {
+	const coords = [v.x, v.y, v.z].filter(coord => coord > -1);
+	return `[${coords.join(",")}]`;
+}
+
+let teleports: Teleport[] = [];
 let isDeleting: boolean = false;
 let activeIndex: number = -1;
 let activeColumn: number = -1;
 let tick: number = 0;
 
 const widgetUpdates = {
-	workersListView(widgetName: string): void {
+	teleportsListView(widgetName: string): void {
 		let listData: string[][] = [];
 		for (let i = 0; i < teleports.length; i++) {
 			let color: string = isDeleting ? "{RED}" : "{WHITE}";
-			let a: string = `[${teleports[i].p0.toString()}]`;
-			let b: string = `[${teleports[i].p1.toString()}]`;
+			let a: string = CoordsXYZToString(teleports[i].p0);
+			let b: string = CoordsXYZToString(teleports[i].p1);
 			if (activeIndex == i) {
 				if (activeColumn == 0)
 					a = "{GREEN}" + a;
@@ -38,39 +70,44 @@ const widgetUpdates = {
 };
 
 const userActions = {
-	add: () => {
-		teleports.push(new Teleport([], [], false));
+	add: (): void => {
+		teleports.push({ p0: { x: -1, y: -1, z: -1 }, p1: { x: -1, y: -1, z: -1 }, register: { a: [], b: [] }, bothWays: false });
+		userActions.listAction(teleports.length - 1, 0);
 		isDeleting = false;
-		mainWin.win().findWidget<ButtonWidget>("delete").isPressed = isDeleting;
 		mainWin.update();
 	},
-	changeDeleteState: () => {
+	changeDeleteState: (): void => {
 		isDeleting = !isDeleting;
-		mainWin.win().findWidget<ButtonWidget>("delete").isPressed = isDeleting;
 		DeActivateTool();
 		mainWin.update();
 	},
 	listAction(index: number, column: number): void {
-		// delete
 		if (isDeleting) {
 			teleports.splice(index, 1);
 		} else {
-			// activate tool
 			if (column == 0 || column == 1) {
 				activeIndex = index;
 				activeColumn = column;
 				ActivateTool();
 			}
-			// both ways
 			else if (column == 2) {
 				teleports[index].bothWays = !teleports[index].bothWays;
+				teleports.forEach(teleport => {
+					teleport.register.a = []; // reset
+					teleport.register.b = []; // reset
+				});
 			}
 		}
+		mainWin.update();
+	},
+	saveTeleports: () => {
+		let saveTeleports = storage.sharedStorage.get("saveTeleports");
+		storage.sharedStorage.set("saveTeleports", !saveTeleports);
 		mainWin.update();
 	}
 };
 
-function DeActivateTool() {
+function DeActivateTool(): void {
 	ui.mainViewport.visibilityFlags &= ~(1 << 7);
 	if (ui.tool && ui.tool.id == "select-points-tool") {
 		ui.tool.cancel();
@@ -80,7 +117,7 @@ function DeActivateTool() {
 	activeColumn = -1;
 }
 
-function ActivateTool() {
+function ActivateTool(): void {
 
 	ui.mainViewport.visibilityFlags |= (1 << 7);
 
@@ -91,8 +128,8 @@ function ActivateTool() {
 		id: "select-points-tool",
 		cursor: "cross_hair",
 		onStart() {
-			tileA = { x: teleports[activeIndex].p0[0], y: teleports[activeIndex].p0[1] };
-			tileB = { x: teleports[activeIndex].p1[0], y: teleports[activeIndex].p1[1] };
+			tileA = { x: teleports[activeIndex].p0.x, y: teleports[activeIndex].p0.y };
+			tileB = { x: teleports[activeIndex].p1.x, y: teleports[activeIndex].p1.y };
 
 			ui.tileSelection.tiles = [tileA, tileB];
 		},
@@ -102,16 +139,16 @@ function ActivateTool() {
 				const tile: Tile = map.getTile(e.mapCoords.x / 32, e.mapCoords.y / 32);
 
 				if (activeColumn == 0)
-					teleports[activeIndex].p0 = [e.mapCoords.x, e.mapCoords.y, tile.elements[e.tileElementIndex].baseZ];
+					teleports[activeIndex].p0 = { x: e.mapCoords.x, y: e.mapCoords.y, z: tile.elements[e.tileElementIndex].baseZ };
 				if (activeColumn == 1)
-					teleports[activeIndex].p1 = [e.mapCoords.x, e.mapCoords.y, tile.elements[e.tileElementIndex].baseZ];
+					teleports[activeIndex].p1 = { x: e.mapCoords.x, y: e.mapCoords.y, z: tile.elements[e.tileElementIndex].baseZ };
 
 				ui.tileSelection.tiles = [
-					{ x: teleports[activeIndex].p0[0], y: teleports[activeIndex].p0[1] },
-					{ x: teleports[activeIndex].p1[0], y: teleports[activeIndex].p1[1] }
+					{ x: teleports[activeIndex].p0.x, y: teleports[activeIndex].p0.y },
+					{ x: teleports[activeIndex].p1.x, y: teleports[activeIndex].p1.y }
 				];
 
-				mainWin.update()
+				mainWin.update();
 			}
 		}
 	});
@@ -158,8 +195,10 @@ function Widgets(): WidgetDesc[] {
 		type: "checkbox",
 		x: 5, y: 145, width: 290, height: 15,
 		text: "Save teleports",
-		name: "save",
-		onChange: () => { }
+		name: "saveTeleports",
+		tooltip: "When game is saved, teleports are too.",
+		isChecked: storage.sharedStorage.get("saveTeleports"),
+		onChange: () => userActions.saveTeleports()
 	});
 
 	return widgets;
@@ -170,7 +209,12 @@ const mainWin = {
 	classification: "multi_teleport",
 	win(): Window { return ui.getWindow(mainWin.classification) },
 	update(): void {
-		widgetUpdates.workersListView("teleportsListView");
+		widgetUpdates.teleportsListView("teleportsListView");
+		mainWin.win().findWidget<ButtonWidget>("delete").isPressed = isDeleting;
+		if (storage.sharedStorage.get("saveTeleports"))
+			storage.parkStorage.set("teleports", teleports);
+		else
+			storage.parkStorage.set("teleports", []);
 	},
 	open(): void {
 		if (mainWin.win()) {
@@ -192,7 +236,40 @@ const mainWin = {
 	}
 };
 
+function IsTeleportSet(teleport: Teleport): boolean {
+	return teleport.p0.x > -1 && teleport.p0.y > -1 && teleport.p0.z > -1 &&
+		teleport.p1.x > -1 && teleport.p1.y > -1 && teleport.p1.z > -1;
+}
+
+function GuestsOnTile(xy: CoordsXY): Guest[] {
+	return map.getAllEntitiesOnTile("guest", { x: xy.x * 32, y: xy.y * 32 });
+}
+
+function SetGuestNewPos(guest: Guest, coordsFrom: CoordsXYZ, coordsTo: CoordsXYZ): void {
+	let offsetx: number = guest.x - coordsFrom.x;
+	let offsety: number = guest.y - coordsFrom.y;
+
+	guest.x = coordsTo.x + offsetx;
+	guest.y = coordsTo.y + offsety;
+	guest.z = coordsTo.z;
+
+	if (guest.direction == 0) guest.destination = { x: guest.x - 32, y: guest.y };
+	if (guest.direction == 1) guest.destination = { x: guest.x, y: guest.y + 32 };
+	if (guest.direction == 2) guest.destination = { x: guest.x + 32, y: guest.y };
+	if (guest.direction == 3) guest.destination = { x: guest.x, y: guest.y - 32 };
+}
+
+function RemoveGuestsFromRegister(register: number[], guests: Guest[]) {
+	for (let i = register.length - 1; i >= 0; i--) {
+		if (guests.every(guest => guest.id !== register[i])) {
+			register.splice(i, 1);
+		}
+	}
+}
+
 export function main(): void {
+
+	teleports = storage.parkStorage.get("teleports") as Teleport[];
 
 	ui.registerMenuItem("Multi teleport", mainWin.open);
 
@@ -202,44 +279,48 @@ export function main(): void {
 
 		if (tick > 20) {
 
-			for (let t in teleports) {
+			teleports.forEach((teleport) => {
 
-				if (teleports[t].p0.length < 3 || teleports[t].p1.length < 3)
-					continue;
+				if (IsTeleportSet(teleport)) {
 
-				const tile: Tile = map.getTile(teleports[t].p0[0] / 32, teleports[t].p0[1] / 32);
+					const tileA: Tile = map.getTile(teleport.p0.x / 32, teleport.p0.y / 32);
+					const tileB: Tile = map.getTile(teleport.p1.x / 32, teleport.p1.y / 32);
 
-				let guests: Guest[] = map.getAllEntitiesOnTile("guest", { x: tile.x * 32, y: tile.y * 32 });
+					let tileAcoords: CoordsXY = { x: tileA.x, y: tileA.y };
+					let tileBcoords: CoordsXY = { x: tileB.x, y: tileB.y };
 
-				guests.forEach((guest) => {
+					GuestsOnTile(tileAcoords).forEach((guest) => {
+						if (guest.z >= teleport.p0.z && guest.z < teleport.p0.z + 16) {
+							if (teleport.bothWays) {
+								if (teleport.register.a.indexOf(Number(guest.id)) === -1 && teleport.register.b.indexOf(Number(guest.id)) === -1) {
+									teleport.register.a.push(Number(guest.id));
+									SetGuestNewPos(guest, teleport.p0, teleport.p1);
+								}
+							} else {
+								SetGuestNewPos(guest, teleport.p0, teleport.p1);
+							}
+						}
+					});
 
-					let p0x: number = teleports[t].p0[0];
-					let p0y: number = teleports[t].p0[1];
-					let p0z: number = teleports[t].p0[2];
+					if (teleport.bothWays) {
 
-					let p1x: number = teleports[t].p1[0];
-					let p1y: number = teleports[t].p1[1];
-					let p1z: number = teleports[t].p1[2];
+						GuestsOnTile(tileBcoords).forEach((guest) => {
+							if (guest.z >= teleport.p1.z && guest.z < teleport.p1.z + 16) {
+								if (teleport.register.a.indexOf(Number(guest.id)) === -1 && teleport.register.b.indexOf(Number(guest.id)) === -1) {
+									teleport.register.b.push(Number(guest.id));
+									SetGuestNewPos(guest, teleport.p1, teleport.p0);
+								}
+							}
+						});
 
-					if (guest.z >= p0z && guest.z < p0z + 16) {
-
-						let offsetx: number = guest.x - teleports[t].p0[0];
-						let offsety: number = guest.y - teleports[t].p0[1];
-
-						guest.x = p1x + offsetx;
-						guest.y = p1y + offsety;
-						guest.z = p1z;
-
-						if (guest.direction == 0) guest.destination = { x: guest.x - 32, y: guest.y };
-						if (guest.direction == 1) guest.destination = { x: guest.x, y: guest.y + 32 };
-						if (guest.direction == 2) guest.destination = { x: guest.x + 32, y: guest.y };
-						if (guest.direction == 3) guest.destination = { x: guest.x, y: guest.y - 32 };
+						RemoveGuestsFromRegister(teleport.register.a, GuestsOnTile(tileBcoords));
+						RemoveGuestsFromRegister(teleport.register.b, GuestsOnTile(tileAcoords));
 
 					}
 
-				})
+				}
 
-			}
+			});
 
 			tick = 0;
 		}
