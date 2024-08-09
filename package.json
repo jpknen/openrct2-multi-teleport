@@ -1,6 +1,6 @@
 {
 	"name": "openrct2-multi-teleport",
-	"version": "1.0",
+	"version": "1.1",
 	"type": "module",
 	"directories": {
 		"lib": "lib"

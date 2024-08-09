@@ -1,5 +1,10 @@
 // main.ts
 
+/**
+ * Issues/to fix:
+ * - z traveling doesnt work on same tile
+ */
+
 interface StorageDefaults {
 	[storageType: string]: { [memberName: string]: { path: string; value: any } }
 }
@@ -36,7 +41,7 @@ interface Teleport {
 	p0: CoordsXYZ;
 	p1: CoordsXYZ;
 	bothWays: boolean;
-	register: { a: number[], b: number[] };
+	register: { p0: number[], p1: number[] };
 }
 
 function CoordsXYZToString(v: CoordsXYZ): string {
@@ -44,7 +49,7 @@ function CoordsXYZToString(v: CoordsXYZ): string {
 	return `[${coords.join(",")}]`;
 }
 
-let teleports: Teleport[] = [];
+let teleports: Teleport[] = storage.parkStorage.get("teleports");
 let isDeleting: boolean = false;
 let activeIndex: number = -1;
 let activeColumn: number = -1;
@@ -55,15 +60,13 @@ const widgetUpdates = {
 		let listData: string[][] = [];
 		for (let i = 0; i < teleports.length; i++) {
 			let color: string = isDeleting ? "{RED}" : "{WHITE}";
-			let a: string = CoordsXYZToString(teleports[i].p0);
-			let b: string = CoordsXYZToString(teleports[i].p1);
+			let p0: string = CoordsXYZToString(teleports[i].p0);
+			let p1: string = CoordsXYZToString(teleports[i].p1);
 			if (activeIndex == i) {
-				if (activeColumn == 0)
-					a = "{GREEN}" + a;
-				if (activeColumn == 1)
-					b = "{GREEN}" + b;
+				if (activeColumn == 0) p0 = "{GREEN}" + p0;
+				if (activeColumn == 1) p1 = "{GREEN}" + p1;
 			}
-			listData.push([color + a, color + b, color + String(teleports[i].bothWays)]);
+			listData.push([color + p0, color + p1, color + String(teleports[i].bothWays)]);
 		}
 		mainWin.win().findWidget<ListViewWidget>(widgetName).items = listData;
 	}
@@ -71,7 +74,7 @@ const widgetUpdates = {
 
 const userActions = {
 	add: (): void => {
-		teleports.push({ p0: { x: -1, y: -1, z: -1 }, p1: { x: -1, y: -1, z: -1 }, register: { a: [], b: [] }, bothWays: false });
+		teleports.push({ p0: { x: -1, y: -1, z: -1 }, p1: { x: -1, y: -1, z: -1 }, register: { p0: [], p1: [] }, bothWays: false });
 		userActions.listAction(teleports.length - 1, 0);
 		isDeleting = false;
 		mainWin.update();
@@ -92,7 +95,7 @@ const userActions = {
 			}
 			else if (column == 2) {
 				teleports[index].bothWays = !teleports[index].bothWays;
-				teleports[index].register = { a: [], b: [] }; // reset
+				teleports[index].register = { p0: [], p1: [] }; // reset
 			}
 		}
 		mainWin.update();
@@ -118,17 +121,14 @@ function ActivateTool(): void {
 
 	ui.mainViewport.visibilityFlags |= (1 << 7);
 
-	let tileA = {} as CoordsXY;
-	let tileB = {} as CoordsXY;
-
 	ui.activateTool({
 		id: "select-points-tool",
 		cursor: "cross_hair",
 		onStart() {
-			tileA = { x: teleports[activeIndex].p0.x, y: teleports[activeIndex].p0.y };
-			tileB = { x: teleports[activeIndex].p1.x, y: teleports[activeIndex].p1.y };
-
-			ui.tileSelection.tiles = [tileA, tileB];
+			ui.tileSelection.tiles = [
+				{ x: teleports[activeIndex].p0.x, y: teleports[activeIndex].p0.y },
+				{ x: teleports[activeIndex].p1.x, y: teleports[activeIndex].p1.y }
+			];
 		},
 		onDown: (e: ToolEventArgs) => {
 			if (e.mapCoords !== undefined && e.tileElementIndex !== undefined) {
@@ -247,7 +247,7 @@ function IsSameZ(guest: Guest, teleportCoords: CoordsXYZ): boolean {
 }
 
 function IsNotYetRegistered(guestId: number, teleport: Teleport): boolean {
-	return teleport.register.a.indexOf(guestId) === -1 && teleport.register.b.indexOf(guestId) === -1
+	return teleport.register.p0.indexOf(guestId) === -1 && teleport.register.p1.indexOf(guestId) === -1
 }
 
 function SetGuestNewPos(guest: Guest, coordsFrom: CoordsXYZ, coordsTo: CoordsXYZ): void {
@@ -274,8 +274,6 @@ function RemoveGuestsFromRegister(register: number[], guests: Guest[]) {
 
 export function main(): void {
 
-	teleports = storage.parkStorage.get("teleports") as Teleport[];
-
 	ui.registerMenuItem("Multi teleport", mainWin.open);
 
 	context.subscribe("interval.tick", () => {
@@ -290,12 +288,12 @@ export function main(): void {
 
 					const tileA: Tile = map.getTile(teleport.p0.x / 32, teleport.p0.y / 32);
 					const tileB: Tile = map.getTile(teleport.p1.x / 32, teleport.p1.y / 32);
-
+					
 					GuestsOnTile(tileA).forEach((guest) => {
 						if (IsSameZ(guest, teleport.p0)) {
 							if (teleport.bothWays) {
 								if (IsNotYetRegistered(Number(guest.id), teleport)) {
-									teleport.register.a.push(Number(guest.id));
+									teleport.register.p0.push(Number(guest.id));
 									SetGuestNewPos(guest, teleport.p0, teleport.p1);
 								}
 							} else {
@@ -308,14 +306,14 @@ export function main(): void {
 						GuestsOnTile(tileB).forEach((guest) => {
 							if (IsSameZ(guest, teleport.p1)) {
 								if (IsNotYetRegistered(Number(guest.id), teleport)) {
-									teleport.register.b.push(Number(guest.id));
+									teleport.register.p1.push(Number(guest.id));
 									SetGuestNewPos(guest, teleport.p1, teleport.p0);
 								}
 							}
 						});
 
-						RemoveGuestsFromRegister(teleport.register.a, GuestsOnTile(tileB));
-						RemoveGuestsFromRegister(teleport.register.b, GuestsOnTile(tileA));
+						RemoveGuestsFromRegister(teleport.register.p0, GuestsOnTile(tileB));
+						RemoveGuestsFromRegister(teleport.register.p1, GuestsOnTile(tileA));
 
 					}
 
